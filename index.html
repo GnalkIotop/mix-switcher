@@ -1,0 +1,1239 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<title>Mix Switcher</title>
+
+<style>
+:root {
+  --bg: #0b0b0d;
+  --card: #17171a;
+  --card-active: #202024;
+  --line: #2d2d32;
+  --text: #f5f5f7;
+  --muted: #929299;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Display",
+    sans-serif;
+}
+
+body {
+  padding:
+    max(12px, env(safe-area-inset-top))
+    14px
+    max(18px, env(safe-area-inset-bottom));
+  overscroll-behavior: none;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 2px 14px;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 0;
+  font-weight: 750;
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+button {
+  border: 0;
+  color: var(--text);
+  background: #252529;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-weight: 650;
+}
+
+#add {
+  background: #f2f2f2;
+  color: #111;
+}
+
+#file {
+  display: none;
+}
+
+.transport {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: rgba(11,11,13,.94);
+  backdrop-filter: blur(15px);
+  padding: 8px 0 12px;
+}
+
+.transportrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#play {
+  width: 54px;
+  height: 46px;
+  border-radius: 14px;
+  font-size: 20px;
+  background: #f2f2f2;
+  color: #111;
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 82px;
+  text-align: right;
+}
+
+#scrub {
+  flex: 1;
+  height: 28px;
+  accent-color: #f2f2f2;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty {
+  border: 1px dashed #34343a;
+  border-radius: 16px;
+  padding: 30px 18px;
+  text-align: center;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.track {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px 1fr 72px;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 16px;
+
+  /* wichtig für Hold + Drag */
+  touch-action: pan-y;
+}
+
+.track.active {
+  border-color: #77777f;
+  background: var(--card-active);
+}
+
+.pick {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #29292e;
+  font-size: 16px;
+  padding: 0;
+}
+
+.active .pick {
+  background: #f2f2f2;
+  color: #111;
+}
+
+.name {
+  font-size: 16px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.vol {
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #d8d8dc;
+}
+
+.remove {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: #303035;
+  color: #aaa;
+  display: none;
+}
+
+.track:focus-within .remove {
+  display: block;
+}
+
+.dragging {
+  transform: scale(.99);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  padding: 14px 0;
+}
+
+footer {
+  padding: 12px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+
+  <div>
+    <h1>Mix Switcher</h1>
+    <div class="sub">
+      Synchroner Vergleich deiner Mixe
+    </div>
+  </div>
+
+  <button id="add">＋ Mix</button>
+
+  <input
+    id="file"
+    type="file"
+    accept="audio/*"
+    multiple
+  >
+
+</header>
+
+
+<section class="transport">
+
+  <div class="transportrow">
+
+    <button id="play">▶︎</button>
+
+    <input
+      id="scrub"
+      type="range"
+      min="0"
+      max="1"
+      value="0"
+      step="0.01"
+    >
+
+    <div class="time" id="time">
+      00:00 / 00:00
+    </div>
+
+  </div>
+
+</section>
+
+
+<main id="list" class="list">
+
+  <div class="empty" id="empty">
+
+    Tippe auf „＋ Mix“ und wähle deine Mixe aus.
+
+    <br><br>
+
+    Alle Mixe laufen synchron.
+    Nur der ausgewählte Mix ist hörbar.
+
+  </div>
+
+</main>
+
+
+<div class="hint">
+  Titel gedrückt halten und nach oben/unten ziehen
+  = Lautstärke ändern
+</div>
+
+
+<footer>
+  Audio bleibt lokal auf deinem Gerät.
+</footer>
+
+
+<script>
+
+const $ = selector =>
+  document.querySelector(selector);
+
+
+const list = $("#list");
+const fileInput = $("#file");
+const addButton = $("#add");
+const playButton = $("#play");
+const scrub = $("#scrub");
+const timeElement = $("#time");
+
+
+let audioContext = null;
+let masterGain = null;
+
+let tracks = [];
+
+let playing = false;
+
+let animationFrame = 0;
+
+
+/*
+  AudioContext erzeugen
+*/
+
+function ensureAudio() {
+
+  if (audioContext) return;
+
+  audioContext =
+    new (window.AudioContext ||
+         window.webkitAudioContext)();
+
+  masterGain =
+    audioContext.createGain();
+
+  masterGain.gain.value = 1;
+
+  masterGain.connect(
+    audioContext.destination
+  );
+}
+
+
+/*
+  iOS Audio freischalten
+*/
+
+async function unlockAudio() {
+
+  ensureAudio();
+
+  if (audioContext.state === "suspended") {
+
+    await audioContext.resume();
+
+  }
+
+}
+
+
+/*
+  Zeit formatieren
+*/
+
+function formatTime(seconds) {
+
+  if (!isFinite(seconds))
+    return "00:00";
+
+  seconds = Math.max(0, seconds);
+
+  const minutes =
+    Math.floor(seconds / 60);
+
+  const secs =
+    Math.floor(seconds % 60);
+
+  return (
+    String(minutes).padStart(2,"0")
+    +
+    ":"
+    +
+    String(secs).padStart(2,"0")
+  );
+}
+
+
+/*
+  AudioNode für einen Mix erzeugen
+*/
+
+function createAudioNode(track) {
+
+  ensureAudio();
+
+  if (track.source)
+    return;
+
+  track.source =
+    audioContext.createMediaElementSource(
+      track.audio
+    );
+
+  track.gain =
+    audioContext.createGain();
+
+  track.gain.gain.value =
+    track.active
+      ? 1
+      : 0;
+
+  track.source
+    .connect(track.gain)
+    .connect(masterGain);
+}
+
+
+/*
+  Neue Dateien hinzufügen
+*/
+
+async function addFiles(files) {
+
+  if (!files.length)
+    return;
+
+  await unlockAudio();
+
+  for (const file of files) {
+
+    const audio = new Audio();
+
+    audio.preload = "auto";
+
+    audio.playsInline = true;
+
+    audio.src =
+      URL.createObjectURL(file);
+
+    const track = {
+
+      file: file,
+
+      audio: audio,
+
+      source: null,
+
+      gain: null,
+
+      db: 0,
+
+      active: false,
+
+      name: file.name
+
+    };
+
+    audio.addEventListener(
+      "loadedmetadata",
+      render
+    );
+
+    tracks.push(track);
+
+    createAudioNode(track);
+
+  }
+
+
+  if (
+    tracks.length &&
+    !tracks.some(t => t.active)
+  ) {
+
+    selectTrack(
+      tracks[0],
+      false
+    );
+
+  }
+
+
+  render();
+
+}
+
+
+/*
+  Mix auswählen
+*/
+
+function selectTrack(
+  selected,
+  shouldPlay = true
+) {
+
+  ensureAudio();
+
+  const now =
+    audioContext.currentTime;
+
+
+  for (const track of tracks) {
+
+    track.active =
+      track === selected;
+
+    if (!track.gain)
+      continue;
+
+    track.gain.gain
+      .cancelScheduledValues(now);
+
+    /*
+      Sehr kurzer Fade,
+      damit kein Klick entsteht.
+    */
+
+    track.gain.gain
+      .setTargetAtTime(
+        track.active ? 1 : 0,
+        now,
+        0.008
+      );
+
+  }
+
+
+  render();
+
+
+  if (
+    shouldPlay &&
+    playing
+  ) {
+
+    for (const track of tracks) {
+
+      track.audio
+        .play()
+        .catch(() => {});
+
+    }
+
+  }
+
+}
+
+
+/*
+  Play / Pause
+*/
+
+async function setPlaying(
+  shouldPlay
+) {
+
+  await unlockAudio();
+
+  if (!tracks.length)
+    return;
+
+
+  if (shouldPlay) {
+
+    /*
+      Position des momentan
+      ausgewählten Mixes verwenden.
+    */
+
+    const active =
+      tracks.find(t => t.active);
+
+    const position =
+      active
+        ? active.audio.currentTime
+        : 0;
+
+
+    /*
+      Alle Mixe exakt auf diese
+      Position setzen.
+    */
+
+    for (const track of tracks) {
+
+      try {
+
+        track.audio.currentTime =
+          position;
+
+      } catch(e) {}
+
+    }
+
+
+    /*
+      Danach alle gleichzeitig starten.
+    */
+
+    for (const track of tracks) {
+
+      track.audio
+        .play()
+        .catch(() => {});
+
+    }
+
+
+    playing = true;
+
+    playButton.textContent =
+      "❚❚";
+
+  }
+
+  else {
+
+    for (const track of tracks) {
+
+      track.audio.pause();
+
+    }
+
+    playing = false;
+
+    playButton.textContent =
+      "▶︎";
+
+  }
+
+
+  render();
+
+}
+
+
+/*
+  Gesamtlänge
+*/
+
+function getDuration() {
+
+  const durations =
+    tracks
+      .map(t => t.audio.duration)
+      .filter(isFinite);
+
+  if (!durations.length)
+    return 0;
+
+  return Math.max(...durations);
+
+}
+
+
+/*
+  Position setzen
+*/
+
+function setPosition(position) {
+
+  const value =
+    Number(position);
+
+  for (const track of tracks) {
+
+    try {
+
+      track.audio.currentTime =
+        value;
+
+    } catch(e) {}
+
+  }
+
+}
+
+
+/*
+  Track-Liste darstellen
+*/
+
+function render() {
+
+  const empty =
+    $("#empty");
+
+  if (empty)
+    empty.remove();
+
+
+  list
+    .querySelectorAll(".track")
+    .forEach(el =>
+      el.remove()
+    );
+
+
+  tracks.forEach(
+    (track, index) => {
+
+      const element =
+        document.createElement("div");
+
+      element.className =
+        "track"
+        +
+        (track.active
+          ? " active"
+          : "");
+
+      element.dataset.index =
+        index;
+
+
+      element.innerHTML = `
+
+        <button
+          class="pick"
+          aria-label="Mix auswählen"
+        >
+          ${track.active ? "●" : "○"}
+        </button>
+
+        <div class="titleArea">
+
+          <div class="name">
+            ${escapeHTML(track.name)}
+          </div>
+
+          <div class="meta">
+            ${
+              track.active
+                ? "AKTIV · Tap zum Umschalten"
+                : "Tap zum Abhören"
+            }
+          </div>
+
+        </div>
+
+        <div class="vol">
+
+          ${
+            track.db <= -59
+              ? "−∞"
+              : track.db.toFixed(1) + " dB"
+          }
+
+        </div>
+
+        <button
+          class="remove"
+          aria-label="Mix löschen"
+        >
+          ×
+        </button>
+
+      `;
+
+
+      element
+        .querySelector(".pick")
+        .onclick = () => {
+
+          unlockAudio()
+            .then(() =>
+              selectTrack(track)
+            );
+
+        };
+
+
+      element
+        .querySelector(".titleArea")
+        .onclick = () => {
+
+          unlockAudio()
+            .then(() =>
+              selectTrack(track)
+            );
+
+        };
+
+
+      element
+        .querySelector(".remove")
+        .onclick = () => {
+
+          removeTrack(index);
+
+        };
+
+
+      attachVolumeDrag(
+        element,
+        track
+      );
+
+
+      list.appendChild(element);
+
+    }
+  );
+
+
+  const duration =
+    getDuration();
+
+
+  scrub.max =
+    duration || 1;
+
+
+  const active =
+    tracks.find(t => t.active);
+
+  const position =
+    active
+      ? active.audio.currentTime
+      : 0;
+
+
+  if (
+    document.activeElement !== scrub
+  ) {
+
+    scrub.value =
+      Math.min(
+        position,
+        duration || 1
+      );
+
+  }
+
+
+  timeElement.textContent =
+    formatTime(position)
+    +
+    " / "
+    +
+    formatTime(duration);
+
+}
+
+
+/*
+  HTML sicher darstellen
+*/
+
+function escapeHTML(text) {
+
+  return text.replace(
+    /[&<>"']/g,
+    character => {
+
+      const map = {
+
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+
+      };
+
+      return map[character];
+
+    }
+  );
+
+}
+
+
+/*
+  Track löschen
+*/
+
+function removeTrack(index) {
+
+  const track =
+    tracks[index];
+
+  track.audio.pause();
+
+  URL.revokeObjectURL(
+    track.audio.src
+  );
+
+  tracks.splice(
+    index,
+    1
+  );
+
+
+  if (
+    tracks.length &&
+    !tracks.some(t => t.active)
+  ) {
+
+    selectTrack(
+      tracks[0],
+      false
+    );
+
+  }
+
+
+  render();
+
+}
+
+
+/*
+  Hold + vertikales Ziehen
+  für Lautstärke
+*/
+
+function attachVolumeDrag(
+  element,
+  track
+) {
+
+  let startY = 0;
+
+  let startDB = 0;
+
+  let longPress = null;
+
+  let dragging = false;
+
+  let moved = false;
+
+
+  element.addEventListener(
+    "pointerdown",
+    event => {
+
+      /*
+        Buttons nicht als
+        Lautstärke-Geste behandeln.
+      */
+
+      if (
+        event.target.closest("button")
+      )
+        return;
+
+
+      startY =
+        event.clientY;
+
+      startDB =
+        track.db;
+
+      moved = false;
+
+      longPress =
+        setTimeout(() => {
+
+          dragging = true;
+
+          element.classList.add(
+            "dragging"
+          );
+
+        }, 380);
+
+
+      try {
+
+        element.setPointerCapture(
+          event.pointerId
+        );
+
+      } catch(e) {}
+
+    }
+  );
+
+
+  element.addEventListener(
+    "pointermove",
+    event => {
+
+      if (!dragging) {
+
+        if (
+          Math.abs(
+            event.clientY - startY
+          ) > 8
+        ) {
+
+          moved = true;
+
+          clearTimeout(
+            longPress
+          );
+
+        }
+
+        return;
+
+      }
+
+
+      event.preventDefault();
+
+
+      /*
+        10 Pixel = 1 dB
+
+        Nach oben:
+        lauter
+
+        Nach unten:
+        leiser
+      */
+
+      const newDB =
+        Math.max(
+          -60,
+          Math.min(
+            6,
+            startDB -
+            (event.clientY - startY) / 10
+          )
+        );
+
+
+      track.db =
+        newDB;
+
+
+      const linear =
+        newDB <= -59
+          ? 0
+          : Math.pow(
+              10,
+              newDB / 20
+            );
+
+
+      track.gain.gain
+        .setTargetAtTime(
+          linear,
+          audioContext.currentTime,
+          0.015
+        );
+
+
+      const volume =
+        element.querySelector(
+          ".vol"
+        );
+
+
+      if (volume) {
+
+        volume.textContent =
+          newDB <= -59
+            ? "−∞"
+            : newDB.toFixed(1)
+              + " dB";
+
+      }
+
+    }
+  );
+
+
+  element.addEventListener(
+    "pointerup",
+    event => {
+
+      clearTimeout(
+        longPress
+      );
+
+
+      if (dragging) {
+
+        dragging = false;
+
+        element.classList.remove(
+          "dragging"
+        );
+
+        return;
+
+      }
+
+
+      /*
+        Normaler Tap auf den Titel.
+      */
+
+      if (
+        !moved &&
+        !event.target.closest("button")
+      ) {
+
+        selectTrack(track);
+
+      }
+
+    }
+  );
+
+
+  element.addEventListener(
+    "pointercancel",
+    () => {
+
+      clearTimeout(
+        longPress
+      );
+
+      dragging = false;
+
+      element.classList.remove(
+        "dragging"
+      );
+
+    }
+  );
+
+}
+
+
+/*
+  Buttons
+*/
+
+addButton.onclick = () => {
+
+  fileInput.click();
+
+};
+
+
+fileInput.onchange = () => {
+
+  addFiles(
+    fileInput.files
+  );
+
+  /*
+    Damit dieselbe Datei
+    später erneut ausgewählt
+    werden kann.
+  */
+
+  fileInput.value = "";
+
+};
+
+
+playButton.onclick = () => {
+
+  setPlaying(
+    !playing
+  );
+
+};
+
+
+scrub.oninput = () => {
+
+  setPosition(
+    scrub.value
+  );
+
+};
+
+
+/*
+  Anzeige aktualisieren
+*/
+
+function animationLoop() {
+
+  if (tracks.length) {
+
+    const active =
+      tracks.find(t => t.active)
+      ||
+      tracks[0];
+
+
+    const position =
+      active.audio.currentTime || 0;
+
+    const duration =
+      getDuration();
+
+
+    scrub.max =
+      duration || 1;
+
+
+    scrub.value =
+      Math.min(
+        position,
+        duration || 1
+      );
+
+
+    timeElement.textContent =
+      formatTime(position)
+      +
+      " / "
+      +
+      formatTime(duration);
+
+  }
+
+
+  animationFrame =
+    requestAnimationFrame(
+      animationLoop
+    );
+
+}
+
+
+animationLoop();
+
+</script>
+
+</body>
+</html>
