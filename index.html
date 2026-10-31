@@ -113,6 +113,17 @@ button {
   text-align: right;
 }
 
+.status {
+  display: none;
+  padding: 8px 2px;
+  color: #ff9a9a;
+  font-size: 12px;
+}
+
+.status.visible {
+  display: block;
+}
+
 #scrub {
   flex: 1;
   height: 28px;
@@ -243,7 +254,7 @@ footer {
   <input
     id="file"
     type="file"
-    accept="audio/*"
+    accept="audio/*,.mp3,.wav"
     multiple
   >
 
@@ -273,6 +284,7 @@ footer {
 
 </section>
 
+<div id="status" class="status" role="status" aria-live="polite"></div>
 
 <main id="list" class="list">
 
@@ -313,6 +325,7 @@ const addButton = $("#add");
 const playButton = $("#play");
 const scrub = $("#scrub");
 const timeElement = $("#time");
+const statusElement = $("#status");
 
 
 let audioContext = null;
@@ -333,9 +346,15 @@ function ensureAudio() {
 
   if (audioContext) return;
 
+  const AudioContextClass =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+  if (!AudioContextClass)
+    throw new Error("Dieser Browser unterstützt keine Web Audio API.");
+
   audioContext =
-    new (window.AudioContext ||
-         window.webkitAudioContext)();
+    new AudioContextClass();
 
   masterGain =
     audioContext.createGain();
@@ -345,6 +364,13 @@ function ensureAudio() {
   masterGain.connect(
     audioContext.destination
   );
+}
+
+function showStatus(message) {
+
+  statusElement.textContent = message;
+  statusElement.classList.add("visible");
+
 }
 
 
@@ -458,18 +484,35 @@ async function addFiles(files) {
 
       active: false,
 
+      status: "Wird geladen …",
+
       name: file.name
 
     };
 
-    audio.addEventListener(
-      "loadedmetadata",
-      render
-    );
+    audio.addEventListener("loadedmetadata", () => {
+      track.status = "Bereit";
+      render();
+    }, { once: true });
+
+    audio.addEventListener("error", () => {
+      const errorCode = audio.error && audio.error.code;
+      const messages = {
+        1: "Laden abgebrochen",
+        2: "Datei konnte nicht gelesen werden",
+        3: "Audioformat oder Datei ist beschädigt",
+        4: "Audioformat wird nicht unterstützt"
+      };
+
+      track.status = messages[errorCode] || "Fehler beim Laden";
+      render();
+    }, { once: true });
 
     tracks.push(track);
 
     createAudioNode(track);
+
+    audio.load();
 
   }
 
@@ -738,9 +781,11 @@ function render() {
 
           <div class="meta">
             ${
-              track.active
-                ? "AKTIV · Tap zum Umschalten"
-                : "Tap zum Abhören"
+              track.status !== "Bereit"
+                ? escapeHTML(track.status)
+                : track.active
+                  ? "AKTIV · Tap zum Umschalten"
+                  : "Tap zum Abhören"
             }
           </div>
 
@@ -1146,11 +1191,19 @@ addButton.onclick = () => {
 };
 
 
-fileInput.onchange = () => {
+fileInput.onchange = async () => {
 
-  addFiles(
-    fileInput.files
-  );
+  try {
+    await addFiles(fileInput.files);
+    statusElement.classList.remove("visible");
+    statusElement.textContent = "";
+  } catch (error) {
+    showStatus(
+      error instanceof Error
+        ? error.message
+        : "Audio-Dateien konnten nicht geladen werden."
+    );
+  }
 
   /*
     Damit dieselbe Datei
