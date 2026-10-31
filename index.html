@@ -456,9 +456,7 @@ async function addFiles(files) {
   if (!files.length)
     return;
 
-  await unlockAudio();
-
-  for (const file of files) {
+  for (const file of Array.from(files)) {
 
     const audio = new Audio();
 
@@ -509,9 +507,18 @@ async function addFiles(files) {
 
     tracks.push(track);
 
-    createAudioNode(track);
+    render();
 
-    audio.load();
+    try {
+      createAudioNode(track);
+      audio.load();
+    } catch (error) {
+      track.status =
+        error instanceof Error
+          ? error.message
+          : "Audio konnte nicht vorbereitet werden";
+      render();
+    }
 
   }
 
@@ -587,7 +594,9 @@ function selectTrack(
 
       track.audio
         .play()
-        .catch(() => {});
+        .catch(() =>
+          showStatus("Die Wiedergabe konnte nicht gestartet werden.")
+        );
 
     }
 
@@ -651,7 +660,9 @@ async function setPlaying(
 
       track.audio
         .play()
-        .catch(() => {});
+        .catch(() =>
+          showStatus("Die Wiedergabe konnte nicht gestartet werden.")
+        );
 
     }
 
@@ -735,7 +746,7 @@ function render() {
   const empty =
     $("#empty");
 
-  if (empty)
+  if (empty && tracks.length)
     empty.remove();
 
 
@@ -817,6 +828,13 @@ function render() {
           unlockAudio()
             .then(() =>
               selectTrack(track)
+            )
+            .catch(error =>
+              showStatus(
+                error instanceof Error
+                  ? error.message
+                  : "Audio konnte nicht aktiviert werden."
+              )
             );
 
         };
@@ -829,6 +847,13 @@ function render() {
           unlockAudio()
             .then(() =>
               selectTrack(track)
+            )
+            .catch(error =>
+              showStatus(
+                error instanceof Error
+                  ? error.message
+                  : "Audio konnte nicht aktiviert werden."
+              )
             );
 
         };
@@ -853,6 +878,18 @@ function render() {
 
     }
   );
+
+  if (!tracks.length && !empty) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty";
+    emptyState.id = "empty";
+    emptyState.innerHTML =
+      "Tippe auf „＋ Mix“ und wähle deine Mixe aus." +
+      "<br><br>" +
+      "Alle Mixe laufen synchron." +
+      " Nur der ausgewählte Mix ist hörbar.";
+    list.appendChild(emptyState);
+  }
 
 
   const duration =
@@ -1092,12 +1129,14 @@ function attachVolumeDrag(
             );
 
 
-      track.gain.gain
-        .setTargetAtTime(
-          linear,
-          audioContext.currentTime,
-          0.015
-        );
+      if (track.gain) {
+        track.gain.gain
+          .setTargetAtTime(
+            linear,
+            audioContext.currentTime,
+            0.015
+          );
+      }
 
 
       const volume =
