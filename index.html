@@ -90,6 +90,58 @@ button {
   padding: 8px 0 12px;
 }
 
+.setbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.sets {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sets::-webkit-scrollbar {
+  display: none;
+}
+
+.set {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: #17171a;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.set.active {
+  border-color: #77777f;
+  background: #202024;
+}
+
+.set-name,
+.set-action {
+  padding: 7px 9px;
+  background: transparent;
+}
+
+.set-action {
+  padding: 7px;
+  color: var(--muted);
+}
+
+#new-set {
+  flex: 0 0 auto;
+  padding: 9px 11px;
+}
+
 .transportrow {
   display: flex;
   align-items: center;
@@ -288,6 +340,10 @@ footer {
 
 </header>
 
+<div class="setbar">
+  <div id="sets" class="sets" role="tablist" aria-label="Mix-Sets"></div>
+  <button id="new-set" type="button" aria-label="Neues Mix-Set">＋ Set</button>
+</div>
 
 <section class="transport">
 
@@ -314,7 +370,7 @@ footer {
 
 <div id="status" class="status" role="status" aria-live="polite"></div>
 
-<main id="list" class="list">
+<main id="list" class="list" role="tabpanel" tabindex="0">
 
   <div class="empty" id="empty">
 
@@ -336,7 +392,7 @@ footer {
 
 
 <footer>
-  Audio bleibt lokal auf deinem Gerät.
+  Audiodateien und Mix-Sets werden lokal in diesem Browser gespeichert.
 </footer>
 
 
@@ -349,6 +405,8 @@ const $ = selector =>
 const list = $("#list");
 const fileInput = $("#file");
 const addButton = $("#add");
+const setList = $("#sets");
+const newSetButton = $("#new-set");
 const playButton = $("#play");
 const scrub = $("#scrub");
 const timeElement = $("#time");
@@ -358,11 +416,28 @@ const statusElement = $("#status");
 let audioContext = null;
 let masterGain = null;
 
-let tracks = [];
+function createSet(name, id = createId()) {
+  return {
+    id: id,
+    name: name,
+    tracks: []
+  };
+}
+
+function createId() {
+  return window.crypto && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+let sets = [createSet("Set 1")];
+let activeSetId = sets[0].id;
+let tracks = sets[0].tracks;
 
 let playing = false;
 
 let animationFrame = 0;
+let databasePromise = null;
 
 
 /*
@@ -397,6 +472,104 @@ function showStatus(message) {
 
   statusElement.textContent = message;
   statusElement.classList.add("visible");
+
+}
+
+function openStorage() {
+
+  if (databasePromise)
+    return databasePromise;
+
+  databasePromise = new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("Dieser Browser unterstützt keine lokale Speicherung."));
+      return;
+    }
+
+    const request = indexedDB.open("mix-switcher", 1);
+
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore("app", { keyPath: "id" });
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(
+      request.error || new Error("Lokaler Speicher konnte nicht geöffnet werden.")
+    );
+    request.onblocked = () => reject(
+      new Error("Lokaler Speicher ist durch einen anderen Tab blockiert.")
+    );
+  });
+
+  return databasePromise;
+
+}
+
+function storedSet(set) {
+
+  return {
+    id: set.id,
+    name: set.name,
+    activeTrackIndex: set.tracks.findIndex(track => track.active),
+    tracks: set.tracks.map(track => ({
+      name: track.file.name,
+      type: track.file.type,
+      lastModified: track.file.lastModified,
+      file: track.file.slice(0, track.file.size, track.file.type),
+      db: track.db
+    }))
+  };
+
+}
+
+async function persistState() {
+
+  try {
+    const database = await openStorage();
+    const state = {
+      id: "current",
+      activeSetId: activeSetId,
+      sets: sets.map(storedSet)
+    };
+
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction("app", "readwrite");
+      transaction.objectStore("app").put(state);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(
+        transaction.error || new Error("Änderungen konnten nicht gespeichert werden.")
+      );
+      transaction.onabort = () => reject(
+        transaction.error || new Error("Speichern wurde abgebrochen.")
+      );
+    });
+    return true;
+  } catch (error) {
+    showStatus(
+      error instanceof Error
+        ? `Lokales Speichern fehlgeschlagen: ${error.message}`
+        : "Lokales Speichern fehlgeschlagen."
+    );
+    return false;
+  }
+
+}
+
+async function readStoredState() {
+
+  const database = await openStorage();
+
+  return new Promise((resolve, reject) => {
+    const request = database
+      .transaction("app", "readonly")
+      .objectStore("app")
+      .get("current");
+
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(
+      request.error || new Error("Gespeicherte Mix-Sets konnten nicht geladen werden.")
+    );
+  });
 
 }
 
@@ -479,97 +652,81 @@ function createAudioNode(track) {
   Neue Dateien hinzufügen
 */
 
+function createTrack(file, db = 0, active = false) {
+
+  const audio = new Audio();
+  audio.preload = "auto";
+  audio.playsInline = true;
+  audio.src = URL.createObjectURL(file);
+
+  const track = {
+    file: file,
+    audio: audio,
+    source: null,
+    gain: null,
+    db: db,
+    active: active,
+    status: "Wird geladen …",
+    waveform: null,
+    waveformError: false,
+    name: file.name
+  };
+
+  audio.addEventListener("loadedmetadata", () => {
+    track.status = "Bereit";
+    render();
+  }, { once: true });
+
+  audio.addEventListener("error", () => {
+    const errorCode = audio.error && audio.error.code;
+    const messages = {
+      1: "Laden abgebrochen",
+      2: "Datei konnte nicht gelesen werden",
+      3: "Audioformat oder Datei ist beschädigt",
+      4: "Audioformat wird nicht unterstützt"
+    };
+
+    track.status = messages[errorCode] || "Fehler beim Laden";
+    render();
+  }, { once: true });
+
+  return track;
+
+}
+
+function loadTrack(track) {
+
+  try {
+    createAudioNode(track);
+    track.audio.load();
+    createWaveform(track);
+  } catch (error) {
+    track.status =
+      error instanceof Error
+        ? error.message
+        : "Audio konnte nicht vorbereitet werden";
+    render();
+  }
+
+}
+
 async function addFiles(files) {
 
   if (!files.length)
     return;
 
   for (const file of Array.from(files)) {
-
-    const audio = new Audio();
-
-    audio.preload = "auto";
-
-    audio.playsInline = true;
-
-    audio.src =
-      URL.createObjectURL(file);
-
-    const track = {
-
-      file: file,
-
-      audio: audio,
-
-      source: null,
-
-      gain: null,
-
-      db: 0,
-
-      active: false,
-
-      status: "Wird geladen …",
-
-      waveform: null,
-
-      waveformError: false,
-
-      name: file.name
-
-    };
-
-    audio.addEventListener("loadedmetadata", () => {
-      track.status = "Bereit";
-      render();
-    }, { once: true });
-
-    audio.addEventListener("error", () => {
-      const errorCode = audio.error && audio.error.code;
-      const messages = {
-        1: "Laden abgebrochen",
-        2: "Datei konnte nicht gelesen werden",
-        3: "Audioformat oder Datei ist beschädigt",
-        4: "Audioformat wird nicht unterstützt"
-      };
-
-      track.status = messages[errorCode] || "Fehler beim Laden";
-      render();
-    }, { once: true });
-
+    const track = createTrack(file);
     tracks.push(track);
-
     render();
-
-    try {
-      createAudioNode(track);
-      audio.load();
-      createWaveform(track);
-    } catch (error) {
-      track.status =
-        error instanceof Error
-          ? error.message
-          : "Audio konnte nicht vorbereitet werden";
-      render();
-    }
-
+    loadTrack(track);
   }
 
-
-  if (
-    tracks.length &&
-    !tracks.some(t => t.active)
-  ) {
-
-    selectTrack(
-      tracks[0],
-      false
-    );
-
-  }
-
+  if (tracks.length && !tracks.some(track => track.active))
+    selectTrack(tracks[0], false);
 
   render();
+  await persistState();
 
 }
 
@@ -869,6 +1026,7 @@ function selectTrack(
 
 
   render();
+  persistState();
 
 
   if (
@@ -1022,12 +1180,241 @@ function setPosition(position) {
 
 }
 
+function renderSets() {
+
+  setList.replaceChildren();
+  list.setAttribute("aria-labelledby", `set-tab-${activeSetId}`);
+
+  for (const set of sets) {
+    const item = document.createElement("div");
+    item.className = "set" + (set.id === activeSetId ? " active" : "");
+
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "set-name";
+    tab.id = `set-tab-${set.id}`;
+    tab.role = "tab";
+    tab.textContent = set.name;
+    tab.setAttribute("aria-selected", String(set.id === activeSetId));
+    tab.setAttribute("aria-controls", "list");
+    tab.tabIndex = set.id === activeSetId ? 0 : -1;
+    tab.onclick = () => switchSet(set.id);
+    tab.onkeydown = event => {
+      const currentIndex = sets.findIndex(item => item.id === set.id);
+      let nextIndex = currentIndex;
+
+      if (event.key === "ArrowRight")
+        nextIndex = (currentIndex + 1) % sets.length;
+      else if (event.key === "ArrowLeft")
+        nextIndex = (currentIndex - 1 + sets.length) % sets.length;
+      else if (event.key === "Home")
+        nextIndex = 0;
+      else if (event.key === "End")
+        nextIndex = sets.length - 1;
+      else
+        return;
+
+      event.preventDefault();
+      const nextSet = sets[nextIndex];
+      switchSet(nextSet.id).then(() => {
+        document.getElementById(`set-tab-${nextSet.id}`)?.focus();
+      });
+    };
+
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "set-action";
+    rename.textContent = "✎";
+    rename.setAttribute("aria-label", `${set.name} umbenennen`);
+    rename.onclick = () => renameSet(set.id);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "set-action";
+    remove.textContent = "×";
+    remove.disabled = sets.length === 1;
+    remove.setAttribute("aria-label", `${set.name} löschen`);
+    remove.onclick = () => deleteSet(set.id);
+
+    item.append(tab, rename, remove);
+    setList.appendChild(item);
+  }
+
+}
+
+async function switchSet(id) {
+
+  if (id === activeSetId)
+    return;
+
+  for (const track of tracks)
+    track.audio.pause();
+
+  playing = false;
+  playButton.textContent = "▶︎";
+  activeSetId = id;
+  tracks = sets.find(set => set.id === id).tracks;
+  render();
+  await persistState();
+
+}
+
+async function addSet() {
+
+  let number = sets.length + 1;
+  let name = `Set ${number}`;
+
+  while (sets.some(set => set.name === name)) {
+    number++;
+    name = `Set ${number}`;
+  }
+
+  const set = createSet(name);
+  sets.push(set);
+  await switchSet(set.id);
+
+}
+
+async function renameSet(id) {
+
+  const set = sets.find(item => item.id === id);
+  const name = window.prompt("Name des Mix-Sets:", set.name);
+
+  if (name === null)
+    return;
+
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    showStatus("Der Set-Name darf nicht leer sein.");
+    return;
+  }
+
+  if (sets.some(item =>
+    item.id !== id &&
+    item.name.toLocaleLowerCase() === trimmedName.toLocaleLowerCase()
+  )) {
+    showStatus("Dieser Set-Name wird bereits verwendet.");
+    return;
+  }
+
+  set.name = trimmedName;
+  renderSets();
+  await persistState();
+
+}
+
+async function deleteSet(id) {
+
+  if (sets.length === 1)
+    return;
+
+  const set = sets.find(item => item.id === id);
+  if (!window.confirm(`Mix-Set „${set.name}“ wirklich löschen?`))
+    return;
+
+  const wasActive = id === activeSetId;
+  for (const track of set.tracks)
+    disposeTrack(track);
+
+  sets = sets.filter(item => item.id !== id);
+
+  if (wasActive) {
+    playing = false;
+    playButton.textContent = "▶︎";
+    activeSetId = sets[0].id;
+    tracks = sets[0].tracks;
+  }
+
+  render();
+  await persistState();
+
+}
+
+async function initializeSets() {
+
+  addButton.disabled = true;
+  newSetButton.disabled = true;
+
+  try {
+    const saved = await readStoredState();
+
+    if (saved && Array.isArray(saved.sets) && saved.sets.length) {
+      sets = saved.sets.map(savedSet => {
+        const set = createSet(
+          typeof savedSet.name === "string" ? savedSet.name : "Mix-Set",
+          savedSet.id
+        );
+        const records = Array.isArray(savedSet.tracks)
+          ? savedSet.tracks
+          : [];
+        const selectedIndex = Number.isInteger(savedSet.activeTrackIndex)
+          ? savedSet.activeTrackIndex
+          : 0;
+
+        set.tracks = records.flatMap((record, index) => {
+          if (!record.file || !(record.file instanceof Blob)) {
+            showStatus(`Eine gespeicherte Datei in „${set.name}“ konnte nicht wiederhergestellt werden.`);
+            return [];
+          }
+
+          const file = record.file instanceof File
+            ? record.file
+            : new File(
+                [record.file],
+                record.name || "Audio",
+                {
+                  type: record.type || record.file.type,
+                  lastModified: record.lastModified || Date.now()
+                }
+              );
+
+          return [createTrack(
+            file,
+            Number.isFinite(record.db) ? record.db : 0,
+            index === selectedIndex
+          )];
+        });
+
+        if (set.tracks.length && !set.tracks.some(track => track.active))
+          set.tracks[0].active = true;
+
+        return set;
+      });
+
+      activeSetId = sets.some(set => set.id === saved.activeSetId)
+        ? saved.activeSetId
+        : sets[0].id;
+      tracks = sets.find(set => set.id === activeSetId).tracks;
+
+      for (const set of sets) {
+        for (const track of set.tracks)
+          loadTrack(track);
+      }
+    } else {
+      await persistState();
+    }
+  } catch (error) {
+    showStatus(
+      error instanceof Error
+        ? `Mix-Sets konnten nicht geladen werden: ${error.message}`
+        : "Mix-Sets konnten nicht geladen werden."
+    );
+  }
+
+  render();
+  addButton.disabled = false;
+  newSetButton.disabled = false;
+
+}
+
 
 /*
   Track-Liste darstellen
 */
 
 function render() {
+
+  renderSets();
 
   const empty =
     $("#empty");
@@ -1261,11 +1648,7 @@ function removeTrack(index) {
   const track =
     tracks[index];
 
-  track.audio.pause();
-
-  URL.revokeObjectURL(
-    track.audio.src
-  );
+  disposeTrack(track);
 
   tracks.splice(
     index,
@@ -1285,8 +1668,20 @@ function removeTrack(index) {
 
   }
 
+  persistState();
 
   render();
+
+}
+
+function disposeTrack(track) {
+
+  track.audio.pause();
+  track.source?.disconnect();
+  track.gain?.disconnect();
+  URL.revokeObjectURL(track.audio.src);
+  track.audio.removeAttribute("src");
+  track.audio.load();
 
 }
 
@@ -1480,6 +1875,7 @@ function attachVolumeDrag(
           "dragging"
         );
 
+        persistState();
         return;
 
       }
@@ -1516,6 +1912,8 @@ function attachVolumeDrag(
         "dragging"
       );
 
+      persistState();
+
     }
   );
 
@@ -1532,13 +1930,18 @@ addButton.onclick = () => {
 
 };
 
+newSetButton.onclick = () => {
+
+  addSet();
+
+};
 
 fileInput.onchange = async () => {
 
   try {
-    await addFiles(fileInput.files);
     statusElement.classList.remove("visible");
     statusElement.textContent = "";
+    await addFiles(fileInput.files);
   } catch (error) {
     showStatus(
       error instanceof Error
@@ -1627,6 +2030,7 @@ function animationLoop() {
 
 
 animationLoop();
+initializeSets();
 
 </script>
 
